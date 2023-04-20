@@ -1,23 +1,19 @@
 use std::{thread::JoinHandle, thread, sync::{Arc, Mutex, mpsc::{self, Receiver}}, time::Duration};
-
 use flem::Status;
 use serialport::SerialPort;
 
-enum HostSerialPortErrors {
+pub enum HostSerialPortErrors {
     NoDeviceFoundByThatName,
     MultipleDevicesFoundByThatName,
     ErrorConnectingToDevice,
 }
 
-struct FlemSerial<const T: usize> {
+pub struct FlemSerial<const T: usize> {
     selected_port: String,
     baud: u32,
     tx_port: Option<Box<dyn SerialPort>>,
-    rx_port: Option<Box<dyn SerialPort>>,
-    rx_packet: Arc<Mutex<flem::Packet::<T>>>,
     tx_packet: Arc<Mutex<flem::Packet::<T>>>,
     received_packets: Option<Receiver<flem::Packet::<T>>>,
-    rx_buffer: [u8; 64],
     continue_listening: Arc<Mutex<bool>>,
 }
 
@@ -27,15 +23,14 @@ impl<const T: usize> FlemSerial<T> {
             selected_port: "".to_string(),
             baud: 115200,
             tx_port: None,
-            rx_port: None,
             tx_packet: Arc::new(Mutex::new(flem::Packet::<T>::new())),
-            rx_packet: Arc::new(Mutex::new(flem::Packet::<T>::new())),
-            rx_buffer: [0; 64],
             received_packets: None,
             continue_listening: Arc::new(Mutex::new(false)),
         }
     }
 
+    /// Lists the ports detected by the SerialPort library. Returns None if
+    /// no serial ports are detected.
     pub fn list_serial_ports(&self) -> Option<Vec<String>> {
         let mut vec_ports = Vec::new();
 
@@ -49,12 +44,12 @@ impl<const T: usize> FlemSerial<T> {
                 return Some(vec_ports);
             }
             Err(error) => {
-                print!("{}", error);
                 return None;
             }
         }
     }
 
+    /// Returns a mut reference to the Receiver<flem::Packet<T>> queue.
     pub fn received_packets(&mut self) -> &mut Receiver<flem::Packet<T>> {
         self.received_packets.as_mut().unwrap()
     }
@@ -73,7 +68,6 @@ impl<const T: usize> FlemSerial<T> {
                 if let Ok(port) = serialport::new(port_name, baud).timeout(Duration::from_millis(10)).open() {
 
                     self.tx_port = Some(port.try_clone().expect("Couldn't clone serial port for tx_port"));
-                    self.rx_port = Some(port.try_clone().expect("Couldn't clone serial port for rx_port"));
     
                     return Ok(());
                 } else {
@@ -85,20 +79,32 @@ impl<const T: usize> FlemSerial<T> {
         }
     }
 
-    /// Spawns a new thread and listens for data on the 
+    /// Spawns a new thread and listens for data on. Returns a handle to the 
+    /// thread that can be used to join later.
+    /// 
+    /// Use [received_packets] to get a mpsc::Receiver of type flem::Packet::<T>
     pub fn listen(&mut self) -> JoinHandle<()> 
     {
+        // Reset the continue_listening flag
         *self.continue_listening.lock().unwrap() = true;
         
-        let mut local_rx_port = self.tx_port.as_mut().unwrap().try_clone().expect("Cloning ");
-        let rx_packet_clone = self.rx_packet.clone();
+        // Clone the continue_listening flag
         let continue_listening_clone = self.continue_listening.clone();
+
+        // Create producer / consumer queues
         let (tx, rx) = mpsc::channel::<flem::Packet::<T>>();
 
+        // Populate received_packets with a valid Receiver Queue
         self.received_packets = Some(rx);
+
+        let mut local_rx_port = self.tx_port.as_mut()
+            .unwrap()
+            .try_clone()
+            .expect("Couldn't clone serial port for rx_port");
 
         let rx_thread_handle = thread::spawn(move || {
             let mut rx_buffer = [0 as u8; 64];
+            let mut rx_packet = flem::Packet::<T>::new();
 
             while *continue_listening_clone.lock().unwrap() { 
                 match local_rx_port.read(&mut rx_buffer){
@@ -109,35 +115,32 @@ impl<const T: usize> FlemSerial<T> {
                             thread::sleep(Duration::from_millis(10));
                         }else{
                             for i in 0..bytes_to_read {
-                                if let Ok(mut rx_packet) = rx_packet_clone.lock() {
-                                    match rx_packet.add_byte(rx_buffer[i]) {
-                                        Status::PacketReceived => {
-                                            tx.send(rx_packet.clone()).unwrap();
-                                            rx_packet.reset_lazy();
-                                        },
-                                        Status::PacketBuilding => {
-                                            // Normal, building packet
-                                        },
-                                        Status::HeaderBytesNotFound => {
-                                            rx_packet.reset_lazy();
-                                        }
-                                        _ => {
-                                            tx.send(rx_packet.clone()).unwrap();
-                                            rx_packet.reset_lazy();
-                                        }
+                                match rx_packet.add_byte(rx_buffer[i]) {
+                                    Status::PacketReceived => {
+                                        tx.send(rx_packet.clone()).unwrap();
+                                        rx_packet.reset_lazy();
+                                    },
+                                    Status::PacketBuilding => {
+                                        // Normal, building packet
+                                    },
+                                    Status::HeaderBytesNotFound => {
+                                        rx_packet.reset_lazy();
+                                    }
+                                    _ => {
+                                        tx.send(rx_packet.clone()).unwrap();
+                                        rx_packet.reset_lazy();
                                     }
                                 }
                             }
                         }
                     },
-                    Err(error) => {
-                        println!("Error with serial port: {}", error);
-                        //break;
+                    Err(_error) => {
+                        // Library indicates to retry on errors, so that is 
+                        // what we will do. 
                     }
                 }
             }
 
-            // Set to false, just incase the Error function caused an early exit
             *continue_listening_clone.lock().unwrap() = false;
         });
 
