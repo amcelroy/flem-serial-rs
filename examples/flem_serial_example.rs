@@ -1,4 +1,7 @@
-use std::io;
+use std::{io, thread, time::Duration};
+
+use flem::Status;
+
 fn main() {
     let mut flem_serial = flem_serial_rs::FlemSerial::<512>::new();
 
@@ -6,7 +9,7 @@ fn main() {
 
     let mut selection_invalid = true;
 
-    let mut selected_port: Option<usize> = None;
+    let mut selected_port: Option<String> = None;
 
     while selection_invalid {
         match flem_serial.list_serial_ports() {
@@ -27,7 +30,7 @@ fn main() {
                                 if selection < line {
                                     // Selection is valid
                                     selection_invalid = false;
-                                    selected_port = Some(selection);
+                                    selected_port = Some(ports[selection].clone());
                                 }else if selection == line {
                                     // quit the program
                                     return;
@@ -59,5 +62,51 @@ fn main() {
         }
     }
     
-    flem_serial.connect(ports[], baud);
+    let port_name = &selected_port.unwrap();
+    match flem_serial.connect(port_name, 115200) {
+        Ok(_) => {
+
+        },
+        Err(_) => {
+            println!("Error connecting to serial port {} with error", 
+                port_name
+            );
+        }
+    }
+
+    let uart_rx_thread_handle = flem_serial.listen();
+
+    let uart_tx_thread_handle = thread::spawn(move || {
+        let mut timeout = 0;
+        let rx_queue = flem_serial.received_packet_queue();
+        loop {
+            match rx_queue.recv() {
+                Ok(packet) => {
+                    timeout = 0;
+                    match packet.get_request() {
+                        flem::Request::EVENT => {
+
+                        },
+                        flem::Request::ID => {
+
+                        }
+                        _ => {
+                            println!("Unknown command");
+                        }
+                    }
+                },
+                Err(_) => {
+                    timeout += 1;
+                    thread::sleep(Duration::from_millis(1));
+                    if timeout > 100 {
+
+                    }
+                }
+            }
+        }
+    });
+
+    uart_rx_thread_handle.join();
+    uart_tx_thread_handle.join();
+
 }

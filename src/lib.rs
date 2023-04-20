@@ -50,7 +50,7 @@ impl<const T: usize> FlemSerial<T> {
     }
 
     /// Returns a mut reference to the Receiver<flem::Packet<T>> queue.
-    pub fn received_packets(&mut self) -> &mut Receiver<flem::Packet<T>> {
+    pub fn received_packet_queue(&mut self) -> &mut Receiver<flem::Packet<T>> {
         self.received_packets.as_mut().unwrap()
     }
 
@@ -180,7 +180,7 @@ mod tests {
 
                 let mut valid_packets = 0;
                 loop {
-                    match flem_serial.received_packets().recv() {
+                    match flem_serial.received_packet_queue().recv() {
                         Ok(packet) => {
                             let x = packet.get_request();
                             valid_packets += 1;
