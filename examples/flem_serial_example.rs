@@ -96,7 +96,7 @@ fn main() {
         let mut timeout = 0;
         let rx_queue = flem_serial.received_packet_queue();
         loop {
-            match rx_queue.recv() {
+            match rx_queue.lock().unwrap().recv() {
                 Ok(packet) => {
                     timeout = 0;
                     let packet_data = &packet.get_data();

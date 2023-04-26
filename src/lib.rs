@@ -2,6 +2,10 @@ use std::{thread::JoinHandle, thread, sync::{Arc, Mutex, mpsc::{self, Receiver}}
 use flem::Status;
 use serialport::SerialPort;
 
+type FlemSerialPort = Box<dyn SerialPort>;
+type FlemSerialTx = Option<Arc<Mutex<FlemSerialPort>>>;
+
+
 pub enum HostSerialPortErrors {
     NoDeviceFoundByThatName,
     MultipleDevicesFoundByThatName,
@@ -9,18 +13,14 @@ pub enum HostSerialPortErrors {
 }
 
 pub struct FlemSerial<const T: usize> {
-    selected_port: String,
-    baud: u32,
-    tx_port: Option<Box<dyn SerialPort>>,
-    received_packets: Option<Receiver<flem::Packet::<T>>>,
+    tx_port: FlemSerialTx,
+    received_packets: Option<Mutex<Receiver<flem::Packet::<T>>>>,
     continue_listening: Arc<Mutex<bool>>,
 }
 
 impl<const T: usize> FlemSerial<T> {
     pub fn new() -> Self {
         Self {
-            selected_port: "".to_string(),
-            baud: 115200,
             tx_port: None,
             received_packets: None,
             continue_listening: Arc::new(Mutex::new(false)),
@@ -48,7 +48,8 @@ impl<const T: usize> FlemSerial<T> {
     }
 
     /// Returns a mut reference to the Receiver<flem::Packet<T>> queue.
-    pub fn received_packet_queue(&mut self) -> &mut Receiver<flem::Packet<T>> {
+    pub fn received_packet_queue(&mut self) -> &mut Mutex<Receiver<flem::Packet<T>>> {
+        //self.received_packets.as_mut().unwrap().lock().as_mut().unwrap()
         self.received_packets.as_mut().unwrap()
     }
 
@@ -65,7 +66,7 @@ impl<const T: usize> FlemSerial<T> {
             1 => {
                 if let Ok(port) = serialport::new(port_name, baud).timeout(Duration::from_millis(10)).open() {
 
-                    self.tx_port = Some(port.try_clone().expect("Couldn't clone serial port for tx_port"));
+                    self.tx_port = Some(Arc::new(Mutex::new(port.try_clone().expect("Couldn't clone serial port for tx_port"))));
     
                     return Ok(());
                 } else {
@@ -93,9 +94,11 @@ impl<const T: usize> FlemSerial<T> {
         let (successful_packet_queue, rx) = mpsc::channel::<flem::Packet::<T>>();
 
         // Populate received_packets with a valid Receiver Queue
-        self.received_packets = Some(rx);
+        self.received_packets = Some(Mutex::new(rx));
 
         let mut local_rx_port = self.tx_port.as_mut()
+            .unwrap()
+            .lock()
             .unwrap()
             .try_clone()
             .expect("Couldn't clone serial port for rx_port");
@@ -149,9 +152,8 @@ impl<const T: usize> FlemSerial<T> {
     }
 
     pub fn send(&mut self, packet: &flem::Packet<T>) {
-        // TODO: fix issue with 
-        self.tx_port.as_mut().unwrap().write_all(&packet.bytes()).unwrap();
-        self.tx_port.as_mut().unwrap().flush().unwrap();
+        self.tx_port.as_ref().unwrap().lock().unwrap().as_mut().write_all(&packet.get_data()).unwrap();
+        self.tx_port.as_ref().unwrap().lock().unwrap().as_mut().flush().unwrap();
     }
 }
 
@@ -182,7 +184,7 @@ mod tests {
 
                 let mut valid_packets = 0;
                 loop {
-                    match flem_serial.received_packet_queue().recv() {
+                    match flem_serial.received_packet_queue().lock().unwrap().recv() {
                         Ok(packet) => {
                             let x = packet.get_request();
                             valid_packets += 1;
