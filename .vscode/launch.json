@@ -7,6 +7,21 @@
         {
             "type": "lldb",
             "request": "launch",
+            "name": "FLEM Serial Example Debug",
+            "program": "${workspaceFolder}/target/debug/examples/flem_serial_example",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--example",
+                    "flem_serial_example"
+                ]
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
             "name": "Debug unit tests in library 'flem_serial_rs'",
             "cargo": {
                 "args": [

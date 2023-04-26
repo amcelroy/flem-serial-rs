@@ -12,7 +12,6 @@ pub struct FlemSerial<const T: usize> {
     selected_port: String,
     baud: u32,
     tx_port: Option<Box<dyn SerialPort>>,
-    tx_packet: Arc<Mutex<flem::Packet::<T>>>,
     received_packets: Option<Receiver<flem::Packet::<T>>>,
     continue_listening: Arc<Mutex<bool>>,
 }
@@ -23,7 +22,6 @@ impl<const T: usize> FlemSerial<T> {
             selected_port: "".to_string(),
             baud: 115200,
             tx_port: None,
-            tx_packet: Arc::new(Mutex::new(flem::Packet::<T>::new())),
             received_packets: None,
             continue_listening: Arc::new(Mutex::new(false)),
         }
@@ -92,7 +90,7 @@ impl<const T: usize> FlemSerial<T> {
         let continue_listening_clone = self.continue_listening.clone();
 
         // Create producer / consumer queues
-        let (tx, rx) = mpsc::channel::<flem::Packet::<T>>();
+        let (successful_packet_queue, rx) = mpsc::channel::<flem::Packet::<T>>();
 
         // Populate received_packets with a valid Receiver Queue
         self.received_packets = Some(rx);
@@ -117,7 +115,7 @@ impl<const T: usize> FlemSerial<T> {
                             for i in 0..bytes_to_read {
                                 match rx_packet.add_byte(rx_buffer[i]) {
                                     Status::PacketReceived => {
-                                        tx.send(rx_packet.clone()).unwrap();
+                                        successful_packet_queue.send(rx_packet.clone()).unwrap();
                                         rx_packet.reset_lazy();
                                     },
                                     Status::PacketBuilding => {
@@ -127,7 +125,6 @@ impl<const T: usize> FlemSerial<T> {
                                         rx_packet.reset_lazy();
                                     }
                                     _ => {
-                                        tx.send(rx_packet.clone()).unwrap();
                                         rx_packet.reset_lazy();
                                     }
                                 }
@@ -151,6 +148,11 @@ impl<const T: usize> FlemSerial<T> {
         *self.continue_listening.lock().unwrap() = false;
     }
 
+    pub fn send(&mut self, packet: &flem::Packet<T>) {
+        // TODO: fix issue with 
+        self.tx_port.as_mut().unwrap().write_all(&packet.bytes()).unwrap();
+        self.tx_port.as_mut().unwrap().flush().unwrap();
+    }
 }
 
 #[cfg(test)]
@@ -191,8 +193,6 @@ mod tests {
                         }
                     }
                 }
-
-
 
                 flem_serial.unlisten();
 
