@@ -14,15 +14,28 @@ pub enum HostSerialPortErrors {
 
 pub struct FlemSerial<const T: usize> {
     tx_port: FlemSerialTx,
-    received_packets: Option<Mutex<Receiver<flem::Packet::<T>>>>,
     continue_listening: Arc<Mutex<bool>>,
+}
+
+pub struct FlemRx<const T: usize> {
+    rx_listener_handle: JoinHandle<()>,
+    rx_packet_queue: Receiver<flem::Packet::<T>>,
+}
+
+impl<const T: usize> FlemRx<T> {
+    pub fn queue(&self) -> &Receiver<flem::Packet::<T>> {
+        &self.rx_packet_queue
+    }
+
+    pub fn join_handle(&self) -> &JoinHandle<()> {
+        &self.rx_listener_handle
+    }
 }
 
 impl<const T: usize> FlemSerial<T> {
     pub fn new() -> Self {
         Self {
             tx_port: None,
-            received_packets: None,
             continue_listening: Arc::new(Mutex::new(false)),
         }
     }
@@ -41,16 +54,10 @@ impl<const T: usize> FlemSerial<T> {
                 }
                 return Some(vec_ports);
             }
-            Err(error) => {
+            Err(_error) => {
                 return None;
             }
         }
-    }
-
-    /// Returns a mut reference to the Receiver<flem::Packet<T>> queue.
-    pub fn received_packet_queue(&mut self) -> &mut Mutex<Receiver<flem::Packet<T>>> {
-        //self.received_packets.as_mut().unwrap().lock().as_mut().unwrap()
-        self.received_packets.as_mut().unwrap()
     }
 
     /// Attempts to connect to a serial port with a set baud.
@@ -82,7 +89,7 @@ impl<const T: usize> FlemSerial<T> {
     /// thread that can be used to join later.
     /// 
     /// Use [received_packets] to get a mpsc::Receiver of type flem::Packet::<T>
-    pub fn listen(&mut self) -> JoinHandle<()> 
+    pub fn listen(&mut self) -> FlemRx<T>
     {
         // Reset the continue_listening flag
         *self.continue_listening.lock().unwrap() = true;
@@ -92,9 +99,6 @@ impl<const T: usize> FlemSerial<T> {
 
         // Create producer / consumer queues
         let (successful_packet_queue, rx) = mpsc::channel::<flem::Packet::<T>>();
-
-        // Populate received_packets with a valid Receiver Queue
-        self.received_packets = Some(Mutex::new(rx));
 
         let mut local_rx_port = self.tx_port.as_mut()
             .unwrap()
@@ -144,7 +148,10 @@ impl<const T: usize> FlemSerial<T> {
             *continue_listening_clone.lock().unwrap() = false;
         });
 
-        rx_thread_handle
+        FlemRx {
+            rx_listener_handle: rx_thread_handle,
+            rx_packet_queue: rx,
+        }
     }
 
     pub fn unlisten(&mut self) {
@@ -152,7 +159,7 @@ impl<const T: usize> FlemSerial<T> {
     }
 
     pub fn send(&mut self, packet: &flem::Packet<T>) {
-        self.tx_port.as_ref().unwrap().lock().unwrap().as_mut().write_all(&packet.get_data()).unwrap();
+        self.tx_port.as_ref().unwrap().lock().unwrap().as_mut().write_all(&packet.bytes()).unwrap();
         self.tx_port.as_ref().unwrap().lock().unwrap().as_mut().flush().unwrap();
     }
 }
@@ -171,7 +178,7 @@ mod tests {
         let result = flem_serial.connect(&ports[4], 115200);
         match result {
             Ok(()) => {
-                let thread_handle = flem_serial.listen();
+                let flem_rx = flem_serial.listen();
 
                 // let listener_handle = thread::spawn(move || {
                 //     // Handle the incoming packets
@@ -183,8 +190,9 @@ mod tests {
                 }
 
                 let mut valid_packets = 0;
+                let rx_packet_queue = flem_rx.rx_packet_queue;
                 loop {
-                    match flem_serial.received_packet_queue().lock().unwrap().recv() {
+                    match rx_packet_queue.recv() {
                         Ok(packet) => {
                             let x = packet.get_request();
                             valid_packets += 1;
@@ -198,7 +206,7 @@ mod tests {
 
                 flem_serial.unlisten();
 
-                thread_handle.join().unwrap();
+                flem_rx.rx_listener_handle.join().unwrap();
             },
             Err(error) => {
 

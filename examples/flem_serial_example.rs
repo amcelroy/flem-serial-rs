@@ -84,19 +84,19 @@ fn main() {
         }
     }
 
-    let uart_rx_thread_handle = flem_serial.listen();
+    let flem_rx = flem_serial.listen();
 
     let mut packet = flem::Packet::<PACKET_SIZE>::new();
-    packet.set_request(flem::Request::ID as u8);
+    packet.set_request(5);
     packet.pack();
     flem_serial.send(&packet);
     
 
     let uart_rx_thread_processor = thread::spawn(move || {
         let mut timeout = 0;
-        let rx_queue = flem_serial.received_packet_queue();
+        let rx_queue = flem_rx.queue();
         loop {
-            match rx_queue.lock().unwrap().recv() {
+            match rx_queue.recv() {
                 Ok(packet) => {
                     timeout = 0;
                     let packet_data = &packet.get_data();
@@ -131,9 +131,9 @@ fn main() {
                 }
             }
         }
+        flem_rx.join_handle().join().unwrap();
     });
 
-    uart_rx_thread_handle.join().unwrap();
     uart_rx_thread_processor.join().unwrap();
 
 }
