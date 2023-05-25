@@ -35,34 +35,34 @@ fn main() {
                                     // Selection is valid
                                     selection_invalid = false;
                                     selected_port = Some(ports[selection].clone());
-                                }else if selection == line {
+                                } else if selection == line {
                                     // quit the program
                                     return;
-                                }else{
+                                } else {
                                     // Repeat the selection
                                 }
-                            },
+                            }
                             Err(parse_error) => {
                                 // Bad parse, repeat the selection
                                 println!("Error parsing selection: {}", parse_error.to_string());
                             }
                         }
-                    },
+                    }
                     Err(read_line_error) => {
                         println!(
-                            "Error reading line, exiting program: {}", 
+                            "Error reading line, exiting program: {}",
                             read_line_error.to_string()
                         );
                         return;
                     }
                 }
-            },
+            }
             None => {
                 println!("No serial ports detected, press any key to quit...");
                 match io::stdin().read_line(&mut input_buffer) {
                     Ok(_) => {
                         return;
-                    },
+                    }
                     Err(_) => {
                         return;
                     }
@@ -70,14 +70,13 @@ fn main() {
             }
         }
     }
-    
+
     let port_name = &selected_port.unwrap();
     match flem_serial.connect(port_name, 115200) {
-        Ok(_) => {
-
-        },
+        Ok(_) => {}
         Err(_) => {
-            println!("Error connecting to serial port {} with error, exiting program", 
+            println!(
+                "Error connecting to serial port {} with error, exiting program",
                 port_name
             );
             return;
@@ -90,7 +89,6 @@ fn main() {
     packet.set_request(5);
     packet.pack();
     flem_serial.send(&packet);
-    
 
     let uart_rx_thread_processor = thread::spawn(move || {
         let mut timeout = 0;
@@ -105,35 +103,35 @@ fn main() {
                             let mut float_data = Vec::<f32>::new();
                             for slice in packet_data.chunks(4) {
                                 float_data.push(f32::from_le_bytes([
-                                    slice[0],
-                                    slice[1],
-                                    slice[2],
-                                    slice[3],
+                                    slice[0], slice[1], slice[2], slice[3],
                                 ]));
                             }
                             println!("Real: {}, Imag: {}", float_data[0], float_data[1]);
-                        },
+                        }
                         flem::Request::ID => {
                             let id: flem::DataId = flem::DataId::from(packet_data).unwrap();
-                            println!("Flem Device: {:?}, packet size: {}", id.get_version(), id.get_max_packet_size());
+                            println!(
+                                "Flem Device: {:?}, version {}.{}.{}, packet size: {}",
+                                id.get_name(),
+                                id.get_major(),
+                                id.get_minor(),
+                                id.get_patch(),
+                                id.get_max_packet_size()
+                            );
                         }
                         _ => {
                             println!("Unknown command");
                         }
                     }
-                },
+                }
                 Err(_) => {
                     timeout += 1;
                     thread::sleep(Duration::from_millis(1));
-                    if timeout > 100 {
-
-                    }
+                    if timeout > 100 {}
                 }
             }
         }
-        flem_rx.join_handle().join().unwrap();
     });
 
     uart_rx_thread_processor.join().unwrap();
-
 }
