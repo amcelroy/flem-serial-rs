@@ -97,6 +97,12 @@ impl<const T: usize> FlemSerial<T> {
         }
     }
 
+    pub fn disconnect(&mut self) -> Option<()> {
+        self.unlisten();
+
+        Some(())
+    }
+
     /// Spawns a new thread and listens for data on. Returns a handle to the
     /// thread that can be used to join later.
     ///
@@ -121,7 +127,7 @@ impl<const T: usize> FlemSerial<T> {
             .expect("Couldn't clone serial port for rx_port");
 
         let rx_thread_handle = thread::spawn(move || {
-            let mut rx_buffer = [0 as u8; 64];
+            let mut rx_buffer = [0 as u8; T];
             let mut rx_packet = flem::Packet::<T>::new();
 
             while *continue_listening_clone.lock().unwrap() {
