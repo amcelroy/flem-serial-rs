@@ -80,6 +80,10 @@ impl<const T: usize> FlemSerial<T> {
             0 => Err(HostSerialPortErrors::NoDeviceFoundByThatName),
             1 => {
                 if let Ok(port) = serialport::new(port_name, baud)
+                    .flow_control(serialport::FlowControl::None)
+                    .parity(serialport::Parity::None)
+                    .data_bits(serialport::DataBits::Eight)
+                    .stop_bits(serialport::StopBits::One)
                     .timeout(Duration::from_millis(10))
                     .open()
                 {
