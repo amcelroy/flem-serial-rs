@@ -181,6 +181,7 @@ impl<const T: usize> FlemSerial<T> {
         if let Some(mutex_ref) = self.tx_port.as_ref() {
             if let Ok(mut port) = mutex_ref.lock() {
                 if let Ok(_) = port.as_mut().write_all(&packet.bytes()) {
+                    port.as_mut().flush().unwrap();
                     return Some(());
                 } else {
                     return None;
